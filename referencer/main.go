@@ -4,31 +4,82 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"net/url"
 	"sync"
+	"time"
 )
 
-const maxNestingLevel = 3
+const maxNestingLevel = 20
 
 type Link struct {
-	url    string
+	url    *url.URL
 	status bool
 }
 
-func doResearch(url string, out chan<- Link, nestingLevel int) {
-	resp, err := http.Get(url)
+func (l *Link) Status() string {
+	if l.status {
+		return "Good"
+	} else {
+		return "Bad"
+	}
+}
 
+type Researcher struct {
+	u       *url.URL
+	visited *sync.Map
+}
+
+func newResearcher(u string) *Researcher {
+	ur, err := url.Parse(u)
+	if err != nil || ur.Host == "" || ur.Scheme == "" {
+		return nil
+	}
+
+	return &Researcher{ur, &sync.Map{}}
+}
+
+func (r *Researcher) prepareUrl(urlStr string) (*url.URL, bool) {
+	u, err := url.Parse(urlStr)
+	if err != nil || u.Host+u.Path == "" {
+		return nil, false
+	}
+	if u.Host == "" {
+		u.Host = r.u.Host
+	}
+	if u.Scheme == "" {
+		u.Scheme = r.u.Scheme
+	}
+	if (u.Host != r.u.Host) && (`www.`+u.Host != r.u.Host) && (u.Host != `www.`+r.u.Host) {
+		return nil, false
+	}
+
+	u2, e := url.Parse(u.String())
+	if e != nil {
+		return nil, false
+	}
+
+	return u2, true
+}
+
+func (r *Researcher) doResearch(u *url.URL, out chan<- Link, nestingLevel int) {
+	_, exists := r.visited.LoadOrStore(u.Path, nil)
+	if exists {
+		return
+	}
+
+	resp, err := http.Get(u.String())
 	isInvalid := err != nil
-	out <- Link{url, !isInvalid}
+	out <- Link{u, !isInvalid}
 	if isInvalid {
 		return
 	}
 
 	if nestingLevel < maxNestingLevel {
 		wg := sync.WaitGroup{}
-		for url = range findPageUrls(resp) {
+		for _, u := range getUniquePageUrls(resp, r.prepareUrl) {
 			wg.Add(1)
 			go func() {
-				doResearch(url, out, nestingLevel+1)
+				r.doResearch(u, out, nestingLevel+1)
 				wg.Done()
 			}()
 		}
@@ -36,38 +87,33 @@ func doResearch(url string, out chan<- Link, nestingLevel int) {
 	}
 }
 
-func research(url string, out chan<- Link) {
-	doResearch(url, out, 0)
+func (r *Researcher) research() <-chan Link {
+	out := make(chan Link)
+	go func() {
+		r.doResearch(r.u, out, 0)
+		close(out)
+	}()
+
+	return out
 }
 
 func main() {
-	foundUrls := make(map[string]Link)
-	seedUrls := os.Args[1:]
-
-	links := make(chan Link)
-	chFinished := make(chan bool)
-
-	for _, url := range seedUrls {
-		go func() {
-			research(url, links)
-			chFinished <- true
-		}()
+	args := os.Args[1:]
+	if len(args) != 1 {
+		fmt.Println(`Expected url argument`)
+		os.Exit(1)
 	}
 
-	for c := 0; c < len(seedUrls); {
-		select {
-		case link := <-links:
-			foundUrls[link.url] = link
-		case <-chFinished:
-			c++
-		}
+	start := time.Now()
+	r := newResearcher(args[0])
+	if r == nil {
+		fmt.Println(`Invalid url specified, expected <scheme>://<host>, got: ` + args[0])
+		os.Exit(1)
 	}
 
-	fmt.Println("\nFound", len(foundUrls), "unique urls:\n")
-
-	for url, link := range foundUrls {
-		fmt.Printf(" - [%s] - %s \n", link.status, url)
+	for link := range r.research() {
+		fmt.Printf(" - [%s] - %s \n", link.Status(), link.url.Path)
 	}
 
-	close(links)
+	fmt.Printf("Execution time %s", time.Since(start).String())
 }

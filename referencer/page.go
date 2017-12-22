@@ -1,8 +1,8 @@
 package main
 
 import (
-	"strings"
 	"net/http"
+	"net/url"
 	"golang.org/x/net/html"
 )
 
@@ -22,17 +22,12 @@ func findUrl(t html.Token) (string, bool) {
 		return "", false
 	}
 
-	url, ok := getHref(t)
+	u, ok := getHref(t)
 	if !ok {
 		return "", false
 	}
 
-	httpLink := strings.Index(url, "http") == 0
-	if !httpLink {
-		return "", false
-	}
-
-	return url, true
+	return u, true
 }
 
 func findPageUrls(resp *http.Response) <-chan string {
@@ -49,14 +44,28 @@ func findPageUrls(resp *http.Response) <-chan string {
 				break
 			}
 			if tt == html.StartTagToken {
-				url, ok := findUrl(z.Token())
+				u, ok := findUrl(z.Token())
 				if ok {
-					urls <- url
+					urls <- u
 				}
 			}
 		}
 		close(urls)
 	}()
+
+	return urls
+}
+
+type Preparer func(u string) (*url.URL, bool)
+
+func getUniquePageUrls(res *http.Response, p Preparer) map[string]*url.URL {
+	urls := make(map[string]*url.URL)
+	for u := range findPageUrls(res) {
+		prepared, ok := p(u)
+		if ok {
+			urls[prepared.Path] = prepared
+		}
+	}
 
 	return urls
 }
