@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"sync"
 	"time"
+	"strings"
 )
 
 const maxNestingLevel = 20
@@ -70,7 +71,7 @@ func (r *Researcher) doResearch(u *url.URL, out chan<- Link, nestingLevel int) {
 	resp, err := http.Get(u.String())
 	isInvalid := err != nil || resp.StatusCode != 200
 	out <- Link{u, !isInvalid}
-	if isInvalid {
+	if isInvalid  || !strings.Contains(resp.Header.Get("Content-Type"), `text/html`) {
 		return
 	}
 
