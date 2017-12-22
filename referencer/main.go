@@ -40,7 +40,7 @@ func newResearcher(u string) *Researcher {
 
 func (r *Researcher) prepareUrl(urlStr string) (*url.URL, bool) {
 	u, err := url.Parse(urlStr)
-	if err != nil || u.Host+u.Path == "" {
+	if err != nil || (u.Host+u.Path) == "" {
 		return nil, false
 	}
 	if u.Host == "" {
@@ -49,7 +49,7 @@ func (r *Researcher) prepareUrl(urlStr string) (*url.URL, bool) {
 	if u.Scheme == "" {
 		u.Scheme = r.u.Scheme
 	}
-	if (u.Host != r.u.Host) && (`www.`+u.Host != r.u.Host) && (u.Host != `www.`+r.u.Host) {
+	if (u.Host != r.u.Host) && ((`www.`+u.Host) != r.u.Host) && (u.Host != (`www.`+r.u.Host)) {
 		return nil, false
 	}
 
@@ -68,7 +68,7 @@ func (r *Researcher) doResearch(u *url.URL, out chan<- Link, nestingLevel int) {
 	}
 
 	resp, err := http.Get(u.String())
-	isInvalid := err != nil
+	isInvalid := err != nil || resp.StatusCode != 200
 	out <- Link{u, !isInvalid}
 	if isInvalid {
 		return
